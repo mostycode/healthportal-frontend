@@ -2,52 +2,44 @@
 import Button from 'react-bootstrap/Button';
 import Modal from 'react-bootstrap/Modal';
 import TextField from '@mui/material/TextField';
-import {Box, FormControl, InputLabel, MenuItem, Select} from "@mui/material";
+import {Box, MenuItem} from "@mui/material";
 import {useEffect, useState} from "react";
+import {useSpecializations} from "./SpecializationsContext.jsx";
+import {AdapterDayjs} from "@mui/x-date-pickers/AdapterDayjs";
+import {DateTimePicker, LocalizationProvider} from "@mui/x-date-pickers";
+import dayjs from "dayjs";
 
-function EditModal({ show, onHide, handleModalConfirm, title, appointmentData }) {
-    const [specializations, setSpecializations] = useState([]);
-    const [selectedSpecialization, setSelectedSpecialization] = useState("");
-    const [doctors, setDoctors] = useState([]);
-    const [formData, setFormData] = useState({
+function EditModal({ show, onHide, onConfirm, title, appointmentData }) {
+    const { specializations } = useSpecializations();
+
+    const initialForm = {
         email: '',
         firstName: '',
         lastName: '',
+        dateOfBirth: '',
         doctorId: '',
         appointmentDateTime: '',
         visitType: '',
-    });
+    };
+
+    const [selectedSpecialization, setSelectedSpecialization] = useState("");
+    const [doctors, setDoctors] = useState([]);
+    const [formData, setFormData] = useState(initialForm);
     const [error, setError] = useState(null);
 
-    useEffect(() => {
-        if (show) {
-            const fetchSpecializations = async () => {
-                try {
-                    const response = await fetch("http://localhost:8080/specializations");
-                    if (!response.ok) {
-                        throw new Error(`Error: ${response.status}`);
-                    }
-                    const specializationData = await response.json();
-                    setSpecializations(specializationData);
-                }  catch (err) {
-                    setError(err.message);
-                }
-            };
-            fetchSpecializations();
-        }
-    }, [show]);
-
+    // need to refactor for double use in CreateAppointment
     useEffect(() => {
         if (selectedSpecialization) {
             const fetchDoctors = async () => {
                 try {
-                    const response = await fetch(`http://localhost:8080/doctors/s?id=${selectedSpecialization}`);
+                    const response = await fetch(`http://localhost:8080/api/doctors/s?id=${selectedSpecialization}`);
                     if (!response.ok) {
                         throw new Error(`Error: ${response.status}`);
                     }
                     const doctorsData = await response.json();
                     setDoctors(doctorsData);
 
+                    // when specialization changes, clear the doctorId
                     if (!doctorsData.some((doctor) => doctor.id === formData.doctorId)) {
                         setFormData((prev) => ({
                             ...prev,
@@ -68,7 +60,7 @@ function EditModal({ show, onHide, handleModalConfirm, title, appointmentData })
                 doctorId: ''
             }));
         }
-    }, [selectedSpecialization]);
+    }, [formData.doctorId, selectedSpecialization]);
 
     useEffect(() => {
         if (show && appointmentData) {
@@ -81,32 +73,47 @@ function EditModal({ show, onHide, handleModalConfirm, title, appointmentData })
                 visitType: appointmentData.visitType
             });
             setSelectedSpecialization(appointmentData.doctor.specialization.id);
-            console.log(formData.appointmentDateTime);
+            console.log(appointmentData.doctor.specialization.id);
         }
     }, [show, appointmentData]);
 
     useEffect(() => {
         if (!show) {
             // Clear form data and doctor list when modal is closed
-            setFormData({
-                email: '',
-                firstName: '',
-                lastName: '',
-                doctorId: '',
-                appointmentDateTime: '',
-                visitType: '',
-            });
+            setFormData(initialForm);
             setDoctors([]);
             setSelectedSpecialization('');
         }
     }, [show]);
 
-    function handleInputChange(e) {
-        const { name, value } = e.target;
-        setFormData({
-            ...formData, [name]: value,
-        })
-    }
+    const handleInputChange = (eOrName, value) => {
+        // direct call for pickers *mui pickers pass the value directly and not the event object
+        if (typeof eOrName === "string") {
+
+            const name = eOrName;
+            const parsedValue = dayjs(value);
+
+            // need this to make sure the date is valid before calling .toISOString()
+            if (parsedValue.isValid()) {
+                setFormData((prev) => ({
+                    ...prev,
+                    // [name]: name === "appointmentDateTime" ? value.toISOString() :      // DateTime fields
+                    //         value,
+                    [name]: name === "appointmentDateTime" ? parsedValue.format('YYYY-MM-DDTHH:mm') : value,
+
+                }))
+            }
+
+        } else {
+            // Event object for TextField
+            const { name, value } = eOrName.target;
+            setFormData((prev) => ({
+                ...prev,
+                [name]: value,
+            }));
+        }
+        console.log(formData);
+    };
 
     return (
         <Modal
@@ -143,15 +150,17 @@ function EditModal({ show, onHide, handleModalConfirm, title, appointmentData })
                         disabled
                     />
 
-                    <TextField
-                        label="Appointment Date"
-                        type="datetime-local"
-                        name="appointmentDateTime"
-                        value={formData.appointmentDateTime}
-                        onChange={handleInputChange}
-                        fullWidth
-                        margin="normal"
-                    />
+                    <LocalizationProvider dateAdapter={AdapterDayjs}>
+                        <DateTimePicker
+                            required
+                            label="Appointment Date & Time"
+                            name="appointmentDateTime"
+                            value={formData.appointmentDateTime ? dayjs(formData.appointmentDateTime) : null}
+                            onChange={(newValue) => handleInputChange("appointmentDateTime", newValue)}
+                            minDateTime={dayjs()}
+                        />
+                    </LocalizationProvider>
+
                     <TextField
                         label="Specialization"
                         name="specialization"
@@ -189,7 +198,7 @@ function EditModal({ show, onHide, handleModalConfirm, title, appointmentData })
                 )}
             </Modal.Body>
             <Modal.Footer>
-                <Button variant="primary" onClick={() => handleModalConfirm(formData)}>
+                <Button variant="primary" onClick={() => onConfirm(formData)}>
                     Confirm
                 </Button>
                 <Button onClick={onHide}>Close</Button>
